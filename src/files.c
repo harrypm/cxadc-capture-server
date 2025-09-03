@@ -10,13 +10,15 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
+#include <errno.h>
 
 #include "version.h"
 
 servefile_fn file_root;
 servefile_fn file_version;
 servefile_fn file_cxadc;
-servefile_fn file_linear;
+servefile_fn file_baseband;
 servefile_fn file_start;
 servefile_fn file_stop;
 servefile_fn file_stats;
@@ -25,7 +27,7 @@ struct served_file SERVED_FILES[] = {
   {"/", "Content-Type: text/html; charset=utf-8\r\n", file_root},
   {"/version", "Content-Type: text/plain; charset=utf-8\r\n", file_version},
   {"/cxadc", "Content-Disposition: attachment\r\n", file_cxadc},
-  {"/linear", "Content-Disposition: attachment\r\n", file_linear},
+  {"/baseband", "Content-Disposition: attachment\r\n", file_baseband},
   {"/start", "Content-Type: text/json; charset=utf-8\r\n", file_start},
   {"/stop", "Content-Type: text/json; charset=utf-8\r\n", file_stop},
   {"/stats", "Content-Type: text/json; charset=utf-8\r\n", file_stats},
@@ -162,12 +164,12 @@ struct {
 
     // This is special and not protected by cap_state
     _Atomic pthread_t reader_thread;
-  } linear;
+  } baseband;
 
 } g_state;
 
 void* cxadc_writer_thread(void* id);
-void* linear_writer_thread(void*);
+void* baseband_writer_thread(void*);
 
 static ssize_t timespec_to_nanos(const struct timespec* ts) {
   return (ssize_t)ts->tv_nsec + (ssize_t)ts->tv_sec * 1000000000;
@@ -216,11 +218,11 @@ void file_start(int fd, int argc, char** argv) {
   unsigned cxadc_array[256];
   unsigned cxadc_count = 0;
 
-  char linear_name[64];
-  strcpy(linear_name, "hw:CARD=CXADCADCClockGe");
-  unsigned int linear_rate = 0;
-  unsigned int linear_channels = 0;
-  snd_pcm_format_t linear_format = SND_PCM_FORMAT_UNKNOWN;
+  char baseband_name[64];
+  strcpy(baseband_name, "hw:CARD=CXADCADCClockGe");
+  unsigned int baseband_rate = 0;
+  unsigned int baseband_channels = 0;
+  snd_pcm_format_t baseband_format = SND_PCM_FORMAT_UNKNOWN;
   snd_pcm_t* handle = NULL;
 
   for (int i = 0; i < argc; ++i) {
@@ -235,21 +237,21 @@ void file_start(int fd, int argc, char** argv) {
     }
     char urlencoded[64];
     if (1 == sscanf(argv[i], "lname=%63s", urlencoded)) {
-      urldecode2(linear_name, urlencoded);
+      urldecode2(baseband_name, urlencoded);
       continue;
     }
     if (1 == sscanf(argv[i], "lformat=%63s", urlencoded)) {
-      linear_format = snd_pcm_format_value(urlencoded);
+      baseband_format = snd_pcm_format_value(urlencoded);
       continue;
     }
     unsigned int rate = 0;
     if (1 == sscanf(argv[i], "lrate=%u", &rate) && rate >= 22050 && rate <= 384000) {
-      linear_rate = rate;
+      baseband_rate = rate;
       continue;
     }
     unsigned int channels = 0;
     if (1 == sscanf(argv[i], "lchannels=%u", &channels) && channels >= 1 && channels <= 16) {
-      linear_channels = channels;
+      baseband_channels = channels;
       continue;
     }
   }
@@ -258,14 +260,14 @@ void file_start(int fd, int argc, char** argv) {
 
   for (size_t i = 0; i < cxadc_count; ++i) {
     if (!atomic_ringbuffer_init(&g_state.cxadc[i].ring_buffer, 1 << 30)) {
-      snprintf(errstr, sizeof(errstr) - 1, "failed to allocate ringbuffer: %s", sys_errlist[errno]);
+      snprintf(errstr, sizeof(errstr) - 1, "failed to allocate ringbuffer: %s", strerror(errno));
       goto error;
     }
   }
 
   int err = 0;
 
-  if ((err = snd_pcm_open(&handle, linear_name, SND_PCM_STREAM_CAPTURE, MODE)) < 0) {
+  if ((err = snd_pcm_open(&handle, baseband_name, SND_PCM_STREAM_CAPTURE, MODE)) < 0) {
     snprintf(errstr, sizeof(errstr) - 1, "cannot open ALSA device: %s", snd_strerror(err));
     goto error;
   }
@@ -283,15 +285,15 @@ void file_start(int fd, int argc, char** argv) {
     goto error;
   }
 
-  if (linear_rate) {
+  if (baseband_rate) {
 set_rate:
-    if ((err = snd_pcm_hw_params_set_rate(handle, hw_params, linear_rate, 0)) < 0) {
+    if ((err = snd_pcm_hw_params_set_rate(handle, hw_params, baseband_rate, 0)) < 0) {
       snprintf(errstr, sizeof(errstr) - 1, "cannot set sample rate: %s", snd_strerror(err));
       goto error;
     }
   } else {
-    if (snd_pcm_hw_params_get_rate(hw_params, &linear_rate, 0) < 0) {
-      if ((err = snd_pcm_hw_params_get_rate_max(hw_params, &linear_rate, 0)) < 0) {
+    if (snd_pcm_hw_params_get_rate(hw_params, &baseband_rate, 0) < 0) {
+      if ((err = snd_pcm_hw_params_get_rate_max(hw_params, &baseband_rate, 0)) < 0) {
         snprintf(errstr, sizeof(errstr) - 1, "cannot get sample rate: %s", snd_strerror(err));
         goto error;
       } else {
@@ -300,39 +302,39 @@ set_rate:
     }
   }
 
-  if (linear_channels) {
-    if ((err = snd_pcm_hw_params_set_channels(handle, hw_params, linear_channels)) < 0) {
+  if (baseband_channels) {
+    if ((err = snd_pcm_hw_params_set_channels(handle, hw_params, baseband_channels)) < 0) {
       snprintf(errstr, sizeof(errstr) - 1, "cannot set channel count: %s", snd_strerror(err));
       goto error;
     }
   } else {
-    if ((err = snd_pcm_hw_params_get_channels(hw_params, &linear_channels)) < 0) {
+    if ((err = snd_pcm_hw_params_get_channels(hw_params, &baseband_channels)) < 0) {
       snprintf(errstr, sizeof(errstr) - 1, "cannot get channel count: %s", snd_strerror(err));
       goto error;
     }
   }
 
-  if (linear_format != SND_PCM_FORMAT_UNKNOWN) {
-    if ((err = snd_pcm_hw_params_set_format(handle, hw_params, linear_format)) < 0) {
+  if (baseband_format != SND_PCM_FORMAT_UNKNOWN) {
+    if ((err = snd_pcm_hw_params_set_format(handle, hw_params, baseband_format)) < 0) {
       snprintf(errstr, sizeof(errstr) - 1, "cannot set sample format: %s", snd_strerror(err));
       goto error;
     }
   } else {
-    if ((err = snd_pcm_hw_params_get_format(hw_params, &linear_format)) < 0) {
+    if ((err = snd_pcm_hw_params_get_format(hw_params, &baseband_format)) < 0) {
       snprintf(errstr, sizeof(errstr) - 1, "cannot get sample format: %s", snd_strerror(err));
       goto error;
     }
   }
 
   ssize_t format_size;
-  if ((format_size = snd_pcm_format_size(linear_format, 1)) < 0) {
+  if ((format_size = snd_pcm_format_size(baseband_format, 1)) < 0) {
     snprintf(errstr, sizeof(errstr) - 1, "cannot get format size: %s", snd_strerror(err));
     goto error;
   }
 
-  size_t sample_size = linear_channels * format_size;
-  if (!atomic_ringbuffer_init(&g_state.linear.ring_buffer, (2 << 20) * sample_size)) {
-    snprintf(errstr, sizeof(errstr) - 1, "failed to allocate ringbuffer: %s", sys_errlist[errno]);
+  size_t sample_size = baseband_channels * format_size;
+  if (!atomic_ringbuffer_init(&g_state.baseband.ring_buffer, (2 << 20) * sample_size)) {
+    snprintf(errstr, sizeof(errstr) - 1, "failed to allocate ringbuffer: %s", strerror(errno));
     goto error;
   }
 
@@ -382,7 +384,7 @@ set_rate:
     sprintf(cxadc_name, "/dev/cxadc%u", cxadc_array[i]);
     const int cxadc_fd = open(cxadc_name, O_NONBLOCK);
     if (cxadc_fd < 0) {
-      snprintf(errstr, sizeof(errstr) - 1, "cannot open cxadc: %s", sys_errlist[errno]);
+      snprintf(errstr, sizeof(errstr) - 1, "cannot open cxadc: %s", strerror(errno));
       goto error;
     }
     g_state.cxadc[i].fd = cxadc_fd;
@@ -393,53 +395,53 @@ set_rate:
   struct timespec time3;
   clock_gettime(CLOCK_MONOTONIC_RAW, &time3);
 
-  const long linear_ns = timespec_to_nanos(&time2) - timespec_to_nanos(&time1);
+  const long baseband_ns = timespec_to_nanos(&time2) - timespec_to_nanos(&time1);
   const long cxadc_ns = timespec_to_nanos(&time3) - timespec_to_nanos(&time2);
 
-  g_state.linear.handle = handle;
+  g_state.baseband.handle = handle;
 
   for (size_t i = 0; i < cxadc_count; ++i) {
     pthread_t thread_id;
     if ((err = pthread_create(&thread_id, NULL, cxadc_writer_thread, (void*)i) != 0)) {
-      snprintf(errstr, sizeof(errstr) - 1, "can't create cxadc writer thread: %s", sys_errlist[err]);
+      snprintf(errstr, sizeof(errstr) - 1, "can't create cxadc writer thread: %s", strerror(err));
       goto error;
     }
     g_state.cxadc[i].writer_thread = thread_id;
   }
 
   pthread_t thread_id;
-  if ((err = pthread_create(&thread_id, NULL, linear_writer_thread, NULL) != 0)) {
-    snprintf(errstr, sizeof(errstr) - 1, "can't create linear writer thread: %s", sys_errlist[err]);
+  if ((err = pthread_create(&thread_id, NULL, baseband_writer_thread, NULL) != 0)) {
+    snprintf(errstr, sizeof(errstr) - 1, "can't create baseband writer thread: %s", strerror(err));
     goto error;
   }
-  g_state.linear.writer_thread = thread_id;
+  g_state.baseband.writer_thread = thread_id;
 
   g_state.cap_state = State_Running;
   dprintf(
     fd,
     "{"
     "\"state\": \"%s\","
-    "\"linear_ns\": %ld,"
+    "\"baseband_ns\": %ld,"
     "\"cxadc_ns\": %ld,"
-    "\"linear_rate\": %u,"
-    "\"linear_channels\": %u,"
-    "\"linear_format\": \"%s\""
+    "\"baseband_rate\": %u,"
+    "\"baseband_channels\": %u,"
+    "\"baseband_format\": \"%s\""
     "}",
     capture_state_to_str(State_Running),
-    linear_ns,
+    baseband_ns,
     cxadc_ns,
-    linear_rate,
-    linear_channels,
-    snd_pcm_format_name(linear_format)
+    baseband_rate,
+    baseband_channels,
+    snd_pcm_format_name(baseband_format)
   );
   return;
 
 error:
   g_state.cap_state = State_Failed;
 
-  if (g_state.linear.writer_thread) {
-    pthread_join(g_state.linear.writer_thread, NULL);
-    g_state.linear.writer_thread = 0;
+  if (g_state.baseband.writer_thread) {
+    pthread_join(g_state.baseband.writer_thread, NULL);
+    g_state.baseband.writer_thread = 0;
   }
 
   for (size_t i = 0; i < cxadc_count; ++i) {
@@ -501,7 +503,7 @@ void* cxadc_writer_thread(void* id) {
   return NULL;
 }
 
-void* linear_writer_thread(void* arg) {
+void* baseband_writer_thread(void* arg) {
   (void)arg;
 
   while (g_state.cap_state == State_Starting)
@@ -510,8 +512,8 @@ void* linear_writer_thread(void* arg) {
   if (g_state.cap_state == State_Failed)
     return NULL;
 
-  struct atomic_ringbuffer* buf = &g_state.linear.ring_buffer;
-  snd_pcm_t* handle = g_state.linear.handle;
+  struct atomic_ringbuffer* buf = &g_state.baseband.ring_buffer;
+  snd_pcm_t* handle = g_state.baseband.handle;
 
   while (g_state.cap_state != State_Stopping) {
     void* ptr = atomic_ringbuffer_get_write_ptr(buf);
@@ -552,9 +554,9 @@ void file_stop(int fd, int argc, char** argv) {
   for (size_t i = 0; i < g_state.cxadc_count; ++i)
     pthread_join(g_state.cxadc[i].writer_thread, NULL);
 
-  pthread_join(g_state.linear.writer_thread, NULL);
+  pthread_join(g_state.baseband.writer_thread, NULL);
 
-  while (g_state.linear.reader_thread)
+  while (g_state.baseband.reader_thread)
     usleep(100000);
 
   for (size_t i = 0; i < g_state.cxadc_count; ++i) {
@@ -565,9 +567,9 @@ void file_stop(int fd, int argc, char** argv) {
     g_state.cxadc[i].reader_thread = 0;
   }
 
-  atomic_ringbuffer_free(&g_state.linear.ring_buffer);
-  g_state.linear.writer_thread = 0;
-  g_state.linear.reader_thread = 0;
+  atomic_ringbuffer_free(&g_state.baseband.ring_buffer);
+  g_state.baseband.writer_thread = 0;
+  g_state.baseband.reader_thread = 0;
 
   g_state.cap_state = State_Idle;
 
@@ -609,7 +611,7 @@ void pump_ringbuffer_to_fd(int fd, struct atomic_ringbuffer* buf, _Atomic pthrea
       continue;
     }
     if (count < 0) {
-      fprintf(stderr, "write failed: %s\n", sys_errlist[errno]);
+      fprintf(stderr, "write failed: %s\n", strerror(errno));
       break;
     }
 
@@ -628,10 +630,10 @@ void file_cxadc(int fd, int argc, char** argv) {
   pump_ringbuffer_to_fd(fd, &g_state.cxadc[id].ring_buffer, &g_state.cxadc[id].reader_thread);
 }
 
-void file_linear(int fd, int argc, char** argv) {
+void file_baseband(int fd, int argc, char** argv) {
   (void)argc;
   (void)argv;
-  pump_ringbuffer_to_fd(fd, &g_state.linear.ring_buffer, &g_state.linear.reader_thread);
+  pump_ringbuffer_to_fd(fd, &g_state.baseband.ring_buffer, &g_state.baseband.reader_thread);
 }
 
 void file_stats(int fd, int argc, char** argv) {
@@ -639,17 +641,17 @@ void file_stats(int fd, int argc, char** argv) {
   if (state != State_Running) {
     dprintf(fd, "{\"state\":\"%s\"}", capture_state_to_str(state));
   } else {
-    size_t linear_read, linear_written, linear_difference;
-    atomic_ringbuffer_get_stats(&g_state.linear.ring_buffer, &linear_read, &linear_written, &linear_difference);
+    size_t baseband_read, baseband_written, baseband_difference;
+    atomic_ringbuffer_get_stats(&g_state.baseband.ring_buffer, &baseband_read, &baseband_written, &baseband_difference);
     dprintf(
       fd,
-      "{\"state\":\"%s\",\"overflows\":%zu,\"linear\":{\"read\":%zu,\"written\":%zu,\"difference\":%zu,\"difference_pct\":%zu},\"cxadc\":[",
+      "{\"state\":\"%s\",\"overflows\":%zu,\"baseband\":{\"read\":%zu,\"written\":%zu,\"difference\":%zu,\"difference_pct\":%zu},\"cxadc\":[",
       capture_state_to_str(state),
       g_state.overflow_counter,
-      linear_read,
-      linear_written,
-      linear_difference,
-      linear_difference * 100 / g_state.linear.ring_buffer.buf_size
+      baseband_read,
+      baseband_written,
+      baseband_difference,
+      baseband_difference * 100 / g_state.baseband.ring_buffer.buf_size
     );
     for (size_t i = 0; i < g_state.cxadc_count; ++i) {
       size_t read, written, difference;

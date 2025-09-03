@@ -15,12 +15,12 @@ Endpoints provided:
 - GET `/start`: Start a capture. Returns a JSON with stats. Parameters:
   - `cxadc<number>`: Capture `/dev/cxadc<number>` 
   - `lname=<device name>`: Use `<device name>` ALSA device for capture. Defaults to `hw:CARD=CXADCADCClockGe`
-  - `lformat=<format>`: Linear capture format. Defaults to device default.
-  - `lrate=<rate>`: Linear capture sample rate. Defaults to device default.
-    - `lchannels=<channels>`: Linear capture channels. Defaults to device default.
+  - `lformat=<format>`: Baseband capture format. Defaults to device default.
+  - `lrate=<rate>`: Baseband capture sample rate. Defaults to device default.
+    - `lchannels=<channels>`: Baseband capture channels. Defaults to device default.
 - GET `/cxadc`: Stream the data being captured from a CX card. Parameters:
   - `<number>`: Access the `<number>`th **captured** card (so if you capture `cxadc1` only, you can access it as 0, **not** 1)
-- GET `/linear`: Stream the data being captured from the ALSA device.
+- GET `/baseband`: Stream the data being captured from the ALSA device.
 - GET `/stats`: Capture statistics.
 - GET `/stop`: Stop the current capture. Reports back how many overflows happened.
 
@@ -40,7 +40,7 @@ Then queue up the download of the streams:
 
 ```text
 $ aria2c -Z \
-    http://192.168.1.1:8080/linear \
+    http://192.168.1.1:8080/baseband \
     http://192.168.1.1:8080/cxadc?0 \
     http://192.168.1.1:8080/cxadc?1
 ```
@@ -93,9 +93,9 @@ A static ffmpeg build with libsoxr can be obtained from https://johnvansickle.co
 Usage: local-capture.sh [options] <basepath>
         --video=          Number of CX card to use for video capture (unset=disabled)
         --hifi=           Number of CX card to use for hifi capture (unset=disabled)
-        --linear=         ALSA device identifier for linear (unset=default)
+        --baseband=       ALSA device identifier for baseband (unset=default)
         --add-date        Add current date and time to the filenames
-        --convert-linear  Convert linear to flac+u8
+        --convert-baseband  Convert baseband to flac+u8
         --compress-video  Compress video
         --compress-hifi   Compress hifi
         --resample-hifi   Resample hifi to 10 MSps
@@ -106,12 +106,12 @@ Usage: local-capture.sh [options] <basepath>
 #### Example
 
 ```text
-$ ./local-capture.sh --video=0 --hifi=1 --convert-linear --compress-video --compress-hifi --resample-hifi test
+$ ./local-capture.sh --video=0 --hifi=1 --convert-baseband --compress-video --compress-hifi --resample-hifi test
 Server started (PID 3854)
 server listening on unix:/tmp/tmp.qDMBd0Ynxu/server.sock
 PID 3872 is capturing video to test-video.ldf
 PID 3874 is capturing hifi to test-hifi.flac
-PID 3876 is capturing linear to test-linear.flac, headswitch to test-headswitch.u8
+PID 3876 is capturing baseband to test-baseband.flac, headswitch to test-headswitch.u8
 Capture running... Press 'q' to stop the capture.
 Capturing for 0m 0s... Buffers:  0%  0%  0%
 Capturing for 0m 5s... Buffers:  0%  0%  0%
