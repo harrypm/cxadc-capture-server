@@ -1,0 +1,160 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: linux-x64
+            cc: gcc
+            extension: ""
+          - os: windows-latest
+            target: windows-x64
+            cc: gcc
+            extension: ".exe"
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Install Linux dependencies
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libasound2-dev build-essential cmake pkg-config
+
+    - name: Install Windows dependencies (MSYS2)
+      if: matrix.os == 'windows-latest'
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-pkg-config
+
+    - name: Build Linux binary
+      if: matrix.os == 'ubuntu-latest'
+      run: |
+        gcc -O3 -march=x86-64 -mtune=generic -DNDEBUG -Wall -Wpedantic -Wextra \
+          -DCXADC_CAPTURE_SERVER_MAJOR=1 \
+          -DCXADC_CAPTURE_SERVER_MINOR=4 \
+          -DCXADC_CAPTURE_SERVER_PATCH=0 \
+          src/main.c src/http.c src/files.c \
+          -o cxadc-capture-server \
+          -lasound -lpthread
+        strip cxadc-capture-server
+        ./cxadc-capture-server version
+
+    - name: Build Windows binary
+      if: matrix.os == 'windows-latest'
+      shell: msys2 {0}
+      run: |
+        # Windows build with audio capture disabled (CX cards are Linux-only)
+        gcc -O3 -march=x86-64 -mtune=generic -DNDEBUG -Wall -Wpedantic -Wextra \
+          -DCXADC_CAPTURE_SERVER_MAJOR=1 \
+          -DCXADC_CAPTURE_SERVER_MINOR=4 \
+          -DCXADC_CAPTURE_SERVER_PATCH=0 \
+          -DWINDOWS_BUILD -DNO_AUDIO_CAPTURE \
+          src/main.c src/http.c src/files-windows.c \
+          -o cxadc-capture-server.exe \
+          -lws2_32 -static-libgcc
+        strip cxadc-capture-server.exe
+        ./cxadc-capture-server.exe version
+
+    - name: Create archive
+      run: |
+        if [ "${{ matrix.os }}" = "ubuntu-latest" ]; then
+          tar -czf cxadc-capture-server-${{ matrix.target }}.tar.gz cxadc-capture-server local-capture.sh README.md
+        else
+          7z a cxadc-capture-server-${{ matrix.target }}.zip cxadc-capture-server.exe local-capture.sh README.md
+        fi
+      shell: bash
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: cxadc-capture-server-${{ matrix.target }}
+        path: |
+          cxadc-capture-server${{ matrix.extension }}
+          cxadc-capture-server-${{ matrix.target }}.*
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      with:
+        path: artifacts
+
+    - name: Display structure of downloaded files
+      run: ls -la artifacts/
+
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ github.ref }}
+        release_name: Release ${{ github.ref }}
+        body: |
+          ## cxadc-capture-server Release ${{ github.ref }}
+          
+          ### Features
+          - **Multi-platform support**: Linux x64 and Windows x64 binaries
+          - **Synchronized RF capture**: Multiple CX cards with sample drop resilient buffering
+          - **Dynamic file naming**: Automatic sample rate and bit depth inclusion
+          - **Advanced compression**: FLAC compression with maximum settings
+          - **Baseband audio**: Linear and device-decoded HiFi capture
+          - **Video resampling**: 40 MSps → 20 MSps option
+          - **ALSA protection**: Signal handling prevents device locks
+          
+          ### Download
+          - **Linux**: Download `cxadc-capture-server-linux-x64.tar.gz`
+          - **Windows**: Download `cxadc-capture-server-windows-x64.zip`
+          
+          ### Requirements
+          - **Linux**: glibc 2.17+, ALSA libraries
+          - **Windows**: Windows 10+ (64-bit)
+          
+          See README.md for full documentation and usage examples.
+        draft: false
+        prerelease: false
+
+    - name: Upload Linux Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: artifacts/cxadc-capture-server-linux-x64/cxadc-capture-server-linux-x64.tar.gz
+        asset_name: cxadc-capture-server-linux-x64.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Upload Windows Release Asset
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: artifacts/cxadc-capture-server-windows-x64/cxadc-capture-server-windows-x64.zip
+        asset_name: cxadc-capture-server-windows-x64.zip
+        asset_content_type: application/zip
