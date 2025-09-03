@@ -1,48 +1,54 @@
 # cxadc-capture-server
 
-A terrible HTTP server made for FM RF Archival capturing of various tape formats with 2 cxadc cards and [clockgen mod](https://github.com/oyvindln/vhs-decode/wiki/Clockgen-Mod) hardware.
+A HTTP server for synchronized RF capture of various analog media formats (VHS, Betamax, V2000, Video8, Hi8, etc.) using multiple CX cards and [clockgen mod](https://github.com/oyvindln/vhs-decode/wiki/Clockgen-Mod) hardware.
 
+## Features
+
+- **Multi-card synchronization**: Synchronized capture from up to 2 CX cards
+- **Baseband audio capture**: Simultaneous capture of baseband audio (linear or device-decoded HiFi)
+- **Dynamic file naming**: Automatic inclusion of sample rates and bit depths in filenames
+- **Advanced compression**: FLAC compression with maximum compression levels (11)
+- **Intelligent resampling**: SoX-based resampling for bandwidth optimization
+- **Signal protection**: Prevents ALSA device locks on interruption
+- **Real-time statistics**: Buffer monitoring and overflow detection
 
 ## Usage
 
-
 `cxadc-capture-server version|<port>|unix:<socket>`
 
-> ⚠️ Do not expose the server to the public internet. It is not intended to be secure. 
+> ⚠️ Do not expose the server to the public internet. It is not intended to be secure.
 
-Endpoints provided:
+### HTTP Endpoints
 
-- GET `/`: Hello world.
-- GET `/version`: Version.
-- GET `/start`: Start a capture. Returns a JSON with stats. Parameters:
-  - `cxadc<number>`: Capture `/dev/cxadc<number>` 
-  - `lname=<device name>`: Use `<device name>` ALSA device for capture. Defaults to `hw:CARD=CXADCADCClockGe`
-  - `lformat=<format>`: Baseband capture format. Defaults to device default.
-  - `lrate=<rate>`: Baseband capture sample rate. Defaults to device default.
-    - `lchannels=<channels>`: Baseband capture channels. Defaults to device default.
-- GET `/cxadc`: Stream the data being captured from a CX card. Parameters:
-  - `<number>`: Access the `<number>`th **captured** card (so if you capture `cxadc1` only, you can access it as 0, **not** 1)
-- GET `/baseband`: Stream the data being captured from the ALSA device.
-- GET `/stats`: Capture statistics.
-- GET `/stop`: Stop the current capture. Reports back how many overflows happened.
-
-For more details such as returned JSON format test the endpoints or check the source code.
+- **GET `/`**: Hello world response
+- **GET `/version`**: Returns server version
+- **GET `/start`**: Start a capture session. Returns JSON with statistics
+  - Parameters:
+    - `cxadc<number>`: Capture from `/dev/cxadc<number>` device
+    - `lname=<device>`: ALSA device for baseband capture (default: `hw:CARD=CXADCADCClockGe`)
+    - `lformat=<format>`: Baseband capture format (default: auto-detect)
+    - `lrate=<rate>`: Baseband sample rate in Hz (default: auto-detect)
+    - `lchannels=<channels>`: Baseband channel count (default: auto-detect)
+- **GET `/cxadc`**: Stream RF data from CX card
+  - Parameter: `<number>` - Access the Nth captured card (0-indexed)
+- **GET `/baseband`**: Stream baseband audio data
+- **GET `/stats`**: Real-time capture statistics and buffer status
+- **GET `/stop`**: Stop current capture and return overflow statistics
 
 
 ## Examples
-
 
 ### Remote capture
 
 Start the server on the capture machine:
 
-```text
-$ cxadc-capture-server 8080
+```bash
+cxadc-capture-server 8080
 ```
 
-Then queue up the download of the streams:
+Queue up the download of the streams:
 
-```text
+```bash
 aria2c -Z \
     http://192.168.1.1:8080/baseband \
     http://192.168.1.1:8080/cxadc?0 \
@@ -51,88 +57,91 @@ aria2c -Z \
 
 Start the capture:
 
-```text
+```bash
 curl http://192.168.1.1:8080/start?cxadc0&cxadc1
 ```
 
-Once you're done, you just need to stop it:
+Stop the capture:
 
-```text
+```bash
 curl http://192.168.1.1:8080/stop
 ```
 
 ### Local capture
 
-
-The script `local-capture.sh` is included in the repository to aid with local captures. It runs the sever on a UNIX socket, which is the same thing as used for piping command outputs. The benefit of using the server is the sample drop resilient buffering and better starting point synchronization.
-
+The included `local-capture.sh` script provides an easy interface for local captures using a UNIX socket. This approach offers sample drop resilient buffering and better synchronization than direct streaming.
 
 #### Dependencies
 
-- bash
-- curl
-- jq
-- cxadc-capture-server
-- ffmpeg
-- sox
-- flac (v1.5.0 or newer)
+**Required:**
+- `bash` - Shell for script execution
+- `curl` - HTTP client for server communication  
+- `jq` - JSON processor for parsing server responses
+- `cxadc-capture-server` - The capture server binary
 
+**Optional (for advanced features):**
+- `flac` - FLAC compression (v1.5.0+ recommended for optimal compression)
+- `sox` - Audio resampling and processing
+- `ffmpeg` - Baseband audio processing
 
-You can install the first three from most distros' default repositories: 
+**Installation:**
 
-**RHEL / Fedora**
-
-```text
-yum install bash curl jq
+*RHEL / Fedora:*
+```bash
+yum install bash curl jq flac sox ffmpeg
 ```
 
-**Debian / Ubuntu**
-
-```text
-apt install bash curl jq
+*Debian / Ubuntu:*
+```bash
+apt install bash curl jq flac sox ffmpeg
 ```
 
-The `cxadc_capture_server` binary can be obtained from releases, or compiled from sources. The binary releases support glibc 2.17 and later.
-
-A static ffmpeg build with libsoxr can be obtained from https://johnvansickle.com/ffmpeg/. If placed next to the script, it will be used instead of system ffmpeg.
+The `cxadc-capture-server` binary can be obtained from releases or compiled from source. Binary releases support glibc 2.17 and later.
 
 
 #### Usage
 
+```bash
+local-capture.sh [options] <basepath>
+```
 
-```
-Usage: local-capture.sh [options] <basepath>
-        --video=            Number of CX card to use for video capture (unset=disabled)
-        --hifi=             Number of CX card to use for hifi capture (unset=disabled)
-        --baseband=         ALSA device identifier for baseband (Linear or device decoded HiFi) (unset=default)
-        --add-date          Add current date and time to the filenames
-        --convert-baseband  Convert baseband to flac+u8
-        --compress-video    Compress video
-        --compress-hifi     Compress hifi
-        --resample-hifi     Resample hifi to 10 MSps
-        --debug             Show commands executed
-        --help              Show usage information
-```
+**Options:**
+- `--video=N` - Use CX card N for video capture (disabled if unset)
+- `--hifi=N` - Use CX card N for hifi capture (disabled if unset)  
+- `--baseband=DEVICE` - ALSA device for baseband audio (default: auto-detect)
+- `--add-date` - Add timestamp to filenames
+- `--convert-baseband` - Convert baseband to FLAC + separate headswitch track
+- `--compress-video` - Compress video using FLAC
+- `--compress-video-level=N` - Video compression level 0-11 (default: 11)
+- `--compress-hifi` - Compress hifi using FLAC
+- `--compress-hifi-level=N` - Hifi compression level 0-11 (default: 11)
+- `--resample-hifi` - Resample hifi from 40 MSps to 10 MSps
+- `--resample-video` - Resample video from 40 MSps to 20 MSps
+- `--debug` - Show executed commands
+- `--help` - Display usage information
 
 #### Example
 
+**Basic capture with compression and resampling:**
 
-    ./local-capture.sh --video=0 --hifi=1 --convert-baseband --compress-video --compress-hifi --resample-hifi test
+```bash
+./local-capture.sh --video=0 --hifi=1 --convert-baseband --compress-video --compress-hifi --resample-hifi --resample-video my_tape
+```
 
-Terminal Output:
+**Terminal output:**
 
 ```
 Server started (PID 3854)
 server listening on unix:/tmp/tmp.qDMBd0Ynxu/server.sock
-PID 3872 is capturing video to test-video.ldf
-PID 3874 is capturing hifi to test-hifi.flac
-PID 3876 is capturing baseband to test-baseband.flac, headswitch to test-headswitch.u8
+PID 3872 is capturing video to my_tape-video_20msps_8-bit.flac
+PID 3874 is capturing hifi to my_tape-hifi_10msps_8-bit.flac
+PID 3876 is capturing baseband to my_tape-baseband_46.9msps_24-bit.flac, headswitch to my_tape-headswitch_46.9msps_8-bit.u8
 Capture running... Press 'q' to stop the capture.
 Capturing for 0m 0s... Buffers:  0%  0%  0%
 Capturing for 0m 5s... Buffers:  0%  0%  0%
 ```
 
-Press "q" to stop
+Press 'q' to stop:
 
 ```
 Stopping capture
@@ -141,3 +150,14 @@ Waiting for writes to finish...
 Killing server
 Finished!
 ```
+
+## File Naming Convention
+
+Files are automatically named with sample rate and bit depth information:
+
+- **Video**: `name-video_40msps_8-bit.u8` (raw) or `name-video_20msps_8-bit.flac` (resampled + compressed)
+- **HiFi**: `name-hifi_40msps_8-bit.u8` (raw) or `name-hifi_10msps_8-bit.flac` (resampled + compressed)  
+- **Baseband**: `name-baseband_{rate}msps_24-bit.s24` (raw) or `name-baseband_{rate}msps_24-bit.flac` (compressed)
+- **Headswitch**: `name-headswitch_{rate}msps_8-bit.u8`
+
+Sample rates are dynamically detected and included in filenames for easy identification.

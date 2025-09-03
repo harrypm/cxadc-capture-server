@@ -111,6 +111,10 @@ for i in "$@"; do
 		RESAMPLE_HIFI="YES"
 		shift # past argument with no value
 		;;
+	--resample-video)
+		RESAMPLE_VIDEO="YES"
+		shift # past argument with no value
+		;;
 	--help)
 		SHOW_HELP="YES"
 		shift # past argument with no value
@@ -140,6 +144,7 @@ function usage {
 	printf "\t--compress-hifi         Compress hifi\n" >&2
 	printf "\t--compress-hifi-level   Hifi compression level (unset=11, max compression)\n" >&2
 	printf "\t--resample-hifi         Resample hifi to 10 MSps\n" >&2
+	printf "\t--resample-video        Resample video to 20 MSps\n" >&2
 	printf "\t--debug           Show commands executed\n" >&2
 	printf "\t--help            Show usage information\n" >&2
 	exit 1
@@ -165,6 +170,7 @@ fi
 
 if [ -z "${SOX_CMD-}" ]; then
 	[ -n "${RESAMPLE_HIFI-}" ] || echo "Resampling hifi requires sox." && exit 1
+	[ -n "${RESAMPLE_VIDEO-}" ] || echo "Resampling video requires sox." && exit 1
 fi
 
 OUTPUT_BASEPATH="$1"
@@ -256,16 +262,36 @@ fi
 
 if [[ -n "${VIDEO_IDX-}" ]]; then
 	if [[ -z "${COMPRESS_VIDEO-}" ]]; then
-		VIDEO_PATH="$OUTPUT_BASEPATH-video_40msps_8-bit.u8"
-		curl -X GET --unix-socket "$SOCKET" -s --output "$VIDEO_PATH" "http:/d/cxadc?$VIDEO_IDX" &
+		if [[ -z "${RESAMPLE_VIDEO-}" ]]; then
+			VIDEO_PATH="$OUTPUT_BASEPATH-video_40msps_8-bit.u8"
+			curl -X GET --unix-socket "$SOCKET" -s --output "$VIDEO_PATH" "http:/d/cxadc?$VIDEO_IDX" &
+		else
+			VIDEO_PATH="$OUTPUT_BASEPATH-video_20msps_8-bit.u8"
+			curl -X GET --unix-socket "$SOCKET" -s --output - "http:/d/cxadc?$VIDEO_IDX" | "$SOX_CMD" \
+				-D \
+				-t raw -r 400000 -b 8 -c 1 -L -e unsigned-integer - \
+				-t raw           -b 8 -c 1 -L -e unsigned-integer "$VIDEO_PATH" rate -l 200000 &
+		fi
 	else
-		VIDEO_PATH="$OUTPUT_BASEPATH-video_40msps_8-bit.flac"
 		LEVEL="${COMPRESS_VIDEO_LEVEL:=11}" 
-		curl -X GET --unix-socket "$SOCKET" -s --output - "http:/d/cxadc?$VIDEO_IDX" | "$FLAC_CMD" \
-			--silent -"${LEVEL}" --blocksize=65535 --lax \
-			--sample-rate=40000 --channels=1 --bps=8 \
-			--sign=unsigned --endian=little \
-			-f - -o "$VIDEO_PATH" &
+		if [[ -z "${RESAMPLE_VIDEO-}" ]]; then
+			VIDEO_PATH="$OUTPUT_BASEPATH-video_40msps_8-bit.flac"
+			curl -X GET --unix-socket "$SOCKET" -s --output - "http:/d/cxadc?$VIDEO_IDX" | "$FLAC_CMD" \
+				--silent -"${LEVEL}" --blocksize=65535 --lax \
+				--sample-rate=40000 --channels=1 --bps=8 \
+				--sign=unsigned --endian=little \
+				-f - -o "$VIDEO_PATH" &
+		else
+			VIDEO_PATH="$OUTPUT_BASEPATH-video_20msps_8-bit.flac"
+			curl -X GET --unix-socket "$SOCKET" -s --output - "http:/d/cxadc?$VIDEO_IDX" | "$SOX_CMD" \
+				-D \
+				-t raw -r 400000 -b 8 -c 1 -L -e unsigned-integer - \
+				-t raw           -b 8 -c 1 -L -e unsigned-integer - rate -l 200000 | "$FLAC_CMD" \
+					--silent -"${LEVEL}" --blocksize=65535 --lax \
+					--sample-rate=20000 --channels=1 --bps=8 \
+					--sign=unsigned --endian=little \
+					-f - -o "$VIDEO_PATH" &
+		fi
 	fi
 	VIDEO_PID=$!
 	echo "PID $VIDEO_PID is capturing video to $VIDEO_PATH"
