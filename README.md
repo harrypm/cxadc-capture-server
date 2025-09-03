@@ -125,7 +125,7 @@ local-capture.sh [options] <basepath>
 **Basic capture with compression and resampling:**
 
 ```bash
-./local-capture.sh --video=0 --hifi=1 --convert-baseband --compress-video --compress-hifi --resample-hifi --resample-video my_tape
+./local-capture.sh --add-date --video=0 --hifi=1 --convert-baseband --compress-video --compress-hifi --resample-hifi --resample-video my_tape
 ```
 
 **Terminal output:**
