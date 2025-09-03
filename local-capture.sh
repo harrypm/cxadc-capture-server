@@ -91,6 +91,11 @@ for i in "$@"; do
 		CONVERT_BASEBAND="YES"
 		shift # past argument with no value
 		;;
+	--convert-baseband-no-hs)
+		CONVERT_BASEBAND="YES"
+		NO_HEADSWITCH="YES"
+		shift # past argument with no value
+		;;
 	--compress-video)
 		COMPRESS_VIDEO="YES"
 		shift # past argument with no value
@@ -138,7 +143,8 @@ function usage {
 	printf "\t--hifi=           Number of CX card to use for hifi capture (unset=disabled)\n" >&2
 	printf "\t--baseband=       ALSA device identifier for baseband (unset=default)\n" >&2
 	printf "\t--add-date        Add current date and time to the filenames\n" >&2
-	printf "\t--convert-baseband      Convert baseband to flac+u8\n" >&2
+	printf "\t--convert-baseband      Convert baseband to flac+flac (with headswitch)\n" >&2
+	printf "\t--convert-baseband-no-hs Convert baseband to flac (no headswitch output)\n" >&2
 	printf "\t--compress-video        Compress video\n" >&2
 	printf "\t--compress-video-level  Video compression level (unset=11, max compression)\n" >&2
 	printf "\t--compress-hifi         Compress hifi\n" >&2
@@ -250,14 +256,17 @@ START_RESULT=$(curl -X GET --unix-socket "$SOCKET" -s "$START_URL" || die "Canno
 echo "$START_RESULT" | jq -r .state | xargs test "Running" "=" || die "Server failed to start capture: $(echo "$START_RESULT" | jq -r .fail_reason)"
 BASEBAND_RATE="$(echo "$START_RESULT" | jq -r .baseband_rate)"
 
-# Calculate baseband rate in MSPS for file naming
+# Calculate baseband rate in kHz for file naming (baseband is audio frequency)
 if [[ "$BASEBAND_RATE" -gt 0 ]]; then
-	BASEBAND_RATE_MSPS=$(echo "scale=1; $BASEBAND_RATE / 1000000" | bc -l 2>/dev/null || echo "$(($BASEBAND_RATE / 1000000))")
-	if [[ "$BASEBAND_RATE_MSPS" == *".0" ]]; then
-		BASEBAND_RATE_MSPS=$(echo "$BASEBAND_RATE_MSPS" | sed 's/\.0$//')
+	BASEBAND_RATE_KHZ=$(echo "scale=1; $BASEBAND_RATE / 1000" | bc -l 2>/dev/null || echo "$(($BASEBAND_RATE / 1000))")
+	# Clean up decimal formatting
+	if [[ "$BASEBAND_RATE_KHZ" == *".0" ]]; then
+		BASEBAND_RATE_KHZ=$(echo "$BASEBAND_RATE_KHZ" | sed 's/\.0$//')
 	fi
 else
-	BASEBAND_RATE_MSPS="unknown"
+	# This should never happen for valid baseband audio, but fallback just in case
+	echo "Warning: Baseband rate not detected, check your audio setup" >&2
+	BASEBAND_RATE_KHZ="unknown"
 fi
 
 if [[ -n "${VIDEO_IDX-}" ]]; then
@@ -340,21 +349,33 @@ if [[ -n "${HIFI_IDX-}" ]]; then
 fi
 
 if [[ -n "${CONVERT_BASEBAND-}" ]]; then
-	HEADSWITCH_PATH="$OUTPUT_BASEPATH-headswitch_${BASEBAND_RATE_MSPS}msps_8-bit.u8"
-	BASEBAND_PATH="$OUTPUT_BASEPATH-baseband_${BASEBAND_RATE_MSPS}msps_24-bit.flac"
-	curl -X GET --unix-socket "$SOCKET" -s --output - "http:/d/baseband" | "$FFMPEG_CMD" \
-		-hide_banner -loglevel error \
-		-ar "$BASEBAND_RATE" -ac 3 -f s24le -i - \
-		-filter_complex "[0:a]channelsplit=channel_layout=2.1[FL][FR][headswitch],[FL][FR]amerge=inputs=2[baseband]" \
-		-map "[baseband]" -compression_level 12 "$BASEBAND_PATH" \
-		-map "[headswitch]" -f u8 "$HEADSWITCH_PATH" &
-	BASEBAND_PID=$!
-	echo "PID $BASEBAND_PID is capturing baseband to $BASEBAND_PATH, headswitch to $HEADSWITCH_PATH"
+	BASEBAND_PATH="$OUTPUT_BASEPATH-baseband_${BASEBAND_RATE_KHZ}khz_24-bit.flac"
+	if [[ -z "${NO_HEADSWITCH-}" ]]; then
+		# Convert with headswitch separation
+		HEADSWITCH_PATH="$OUTPUT_BASEPATH-headswitch_${BASEBAND_RATE_KHZ}khz_8-bit.flac"
+		curl -X GET --unix-socket "$SOCKET" -s --output - "http:/d/baseband" | "$FFMPEG_CMD" \
+			-hide_banner -loglevel error \
+			-ar "$BASEBAND_RATE" -ac 3 -f s24le -i - \
+			-filter_complex "[0:a]channelsplit=channel_layout=2.1[FL][FR][headswitch],[FL][FR]amerge=inputs=2[baseband]" \
+			-map "[baseband]" -compression_level 12 "$BASEBAND_PATH" \
+			-map "[headswitch]" -compression_level 12 -f flac "$HEADSWITCH_PATH" &
+		BASEBAND_PID=$!
+		echo "PID $BASEBAND_PID is capturing baseband to $BASEBAND_PATH, headswitch to $HEADSWITCH_PATH"
+	else
+		# Convert without headswitch (stereo only)
+		curl -X GET --unix-socket "$SOCKET" -s --output - "http:/d/baseband" | "$FFMPEG_CMD" \
+			-hide_banner -loglevel error \
+			-ar "$BASEBAND_RATE" -ac 3 -f s24le -i - \
+			-filter_complex "[0:a]channelsplit=channel_layout=2.1[FL][FR][headswitch],[FL][FR]amerge=inputs=2[baseband]" \
+			-map "[baseband]" -compression_level 12 "$BASEBAND_PATH" &
+		BASEBAND_PID=$!
+		echo "PID $BASEBAND_PID is capturing baseband to $BASEBAND_PATH (no headswitch)"
+	fi
 else
-	BASEBAND_PATH="$OUTPUT_BASEPATH-baseband_${BASEBAND_RATE_MSPS}msps_24-bit.s24"
+	BASEBAND_PATH="$OUTPUT_BASEPATH-baseband_${BASEBAND_RATE_KHZ}khz_24-bit.s24"
 	curl -X GET --unix-socket "$SOCKET" -s --output "$BASEBAND_PATH" "http:/d/baseband" &
 	BASEBAND_PID=$!
-	echo "PID $BASEBAND_PID is capturing baseband+headswitch to $BASEBAND_PATH"
+	echo "PID $BASEBAND_PID is capturing raw baseband+headswitch to $BASEBAND_PATH"
 fi
 
 SECONDS=0

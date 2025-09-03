@@ -110,7 +110,8 @@ local-capture.sh [options] <basepath>
 - `--hifi=N` - Use CX card N for hifi capture (disabled if unset)  
 - `--baseband=DEVICE` - ALSA device for baseband audio (default: auto-detect)
 - `--add-date` - Add timestamp to filenames
-- `--convert-baseband` - Convert baseband to FLAC + separate headswitch track
+- `--convert-baseband` - Convert baseband to FLAC + separate headswitch FLAC track
+- `--convert-baseband-no-hs` - Convert baseband to FLAC (no headswitch output)
 - `--compress-video` - Compress video using FLAC
 - `--compress-video-level=N` - Video compression level 0-11 (default: 11)
 - `--compress-hifi` - Compress hifi using FLAC
@@ -128,6 +129,12 @@ local-capture.sh [options] <basepath>
 ./local-capture.sh --add-date --video=0 --hifi=1 --convert-baseband --compress-video --compress-hifi --resample-hifi --resample-video my_tape
 ```
 
+**For setups without headswitch:**
+
+```bash
+./local-capture.sh --add-date --video=0 --hifi=1 --convert-baseband-no-hs --compress-video --compress-hifi my_tape
+```
+
 **Terminal output:**
 
 ```
@@ -135,7 +142,7 @@ Server started (PID 3854)
 server listening on unix:/tmp/tmp.qDMBd0Ynxu/server.sock
 PID 3872 is capturing video to my_tape-video_20msps_8-bit.flac
 PID 3874 is capturing hifi to my_tape-hifi_10msps_8-bit.flac
-PID 3876 is capturing baseband to my_tape-baseband_46.9msps_24-bit.flac, headswitch to my_tape-headswitch_46.9msps_8-bit.u8
+PID 3876 is capturing baseband to my_tape-baseband_46.9khz_24-bit.flac, headswitch to my_tape-headswitch_46.9khz_8-bit.flac
 Capture running... Press 'q' to stop the capture.
 Capturing for 0m 0s... Buffers:  0%  0%  0%
 Capturing for 0m 5s... Buffers:  0%  0%  0%
@@ -157,7 +164,7 @@ Files are automatically named with sample rate and bit depth information:
 
 - **Video**: `name-video_40msps_8-bit.u8` (raw) or `name-video_20msps_8-bit.flac` (resampled + compressed)
 - **HiFi**: `name-hifi_40msps_8-bit.u8` (raw) or `name-hifi_10msps_8-bit.flac` (resampled + compressed)  
-- **Baseband**: `name-baseband_{rate}msps_24-bit.s24` (raw) or `name-baseband_{rate}msps_24-bit.flac` (compressed)
-- **Headswitch**: `name-headswitch_{rate}msps_8-bit.u8`
+- **Baseband**: `name-baseband_{rate}khz_24-bit.s24` (raw) or `name-baseband_{rate}khz_24-bit.flac` (compressed)
+- **Headswitch**: `name-headswitch_{rate}khz_8-bit.flac` (same rate as baseband, compressed)
 
-Sample rates are dynamically detected and included in filenames for easy identification.
+**Note:** Video/HiFi use MHz (msps) as they are RF signals, while baseband/headswitch use kHz as they are audio frequencies. Sample rates are dynamically detected and included in filenames for easy identification.
