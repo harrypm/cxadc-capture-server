@@ -66,7 +66,11 @@ void* http_thread(void* arg) {
     char buf[0x1000];
     ssize_t len = 0;
     do {
+#ifdef _WIN32
+      int cur = recv(client_fd, buf + len, sizeof(buf) - len - 1, 0);
+#else
       int cur = read(client_fd, buf + len, sizeof(buf) - len - 1);
+#endif
       len += cur;
       if (cur <= 0 || len == sizeof(buf) - 1) {
         len = 0;
@@ -88,7 +92,11 @@ void* http_thread(void* arg) {
 
     http_serve(client_fd, method, uri);
   } while (0);
+#ifdef _WIN32
+  closesocket(client_fd);
+#else
   close(client_fd);
+#endif
   return NULL;
 }
 

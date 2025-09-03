@@ -11,8 +11,6 @@ int my_dprintf(int fd, const char *format, ...);
 
 // Windows compatibility macros
 #define dprintf my_dprintf
-#define close closesocket
-#define read(fd, buf, size) recv(fd, buf, size, 0)
 #define usleep(x) Sleep((x)/1000)
 #define MAP_FAILED NULL
 typedef HANDLE pthread_t;

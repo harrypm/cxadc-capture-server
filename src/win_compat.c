@@ -1,4 +1,5 @@
 #include "win_compat.h"
+#include <stdio.h>
 
 #ifdef _WIN32
 
