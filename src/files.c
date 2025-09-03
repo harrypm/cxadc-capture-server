@@ -585,7 +585,7 @@ void file_root(int fd, int argc, char** argv) {
 void file_version(int fd, int argc, char** argv) {
   (void)argc;
   (void)argv;
-  dprintf(fd, "%s\n", CXADC_VHS_SERVER_VERSION);
+  dprintf(fd, "%s\n", CXADC_CAPTURE_SERVER_VERSION);
 }
 
 void pump_ringbuffer_to_fd(int fd, struct atomic_ringbuffer* buf, _Atomic pthread_t* pt) {

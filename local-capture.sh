@@ -7,7 +7,7 @@ SCRIPT_DIR="$(
 	cd "$(dirname "$0")"
 	pwd
 )"
-SERVER="$SCRIPT_DIR/cxadc_vhs_server"
+SERVER="$SCRIPT_DIR/cxadc-capture-server"
 TEMP_DIR="$(mktemp --directory)"
 SOCKET="$TEMP_DIR/server.sock"
 

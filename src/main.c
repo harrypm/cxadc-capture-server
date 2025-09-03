@@ -29,7 +29,7 @@ int main(int argc, char* argv[]) {
   int server_fd;
 
   if (0 == strcmp(argv[1], "version")) {
-    puts(CXADC_VHS_SERVER_VERSION);
+    puts(CXADC_CAPTURE_SERVER_VERSION);
     exit(EXIT_SUCCESS);
   } else if (0 == strncmp(argv[1], "unix:", 5)) {
     const char* path = argv[1] + 5;

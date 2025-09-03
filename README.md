@@ -1,10 +1,12 @@
-# cxadc_vhs_server
+# cxadc-capture-server
 
-A terrible HTTP server made for capturing VHS with two cxadc cards and [cxadc-clock-generator-audio-adc](https://gitlab.com/wolfre/cxadc-clock-generator-audio-adc) or [cxadc-clockgen-mod](https://github.com/namazso/cxadc-clockgen-mod/).
+A terrible HTTP server made for FM RF Archival capturing of various tape formats with 2 cxadc cards and [clockgen mod](https://github.com/oyvindln/vhs-decode/wiki/Clockgen-Mod) hardware.
+
 
 ## Usage
 
-`cxadc_vhs_server version|<port>|unix:<socket>`
+
+`cxadc-capture-server version|<port>|unix:<socket>`
 
 > ⚠️ Do not expose the server to the public internet. It is not intended to be secure. 
 
@@ -26,20 +28,22 @@ Endpoints provided:
 
 For more details such as returned JSON format test the endpoints or check the source code.
 
+
 ## Examples
+
 
 ### Remote capture
 
 Start the server on the capture machine:
 
 ```text
-$ cxadc_vhs_server 8080
+$ cxadc-capture-server 8080
 ```
 
 Then queue up the download of the streams:
 
 ```text
-$ aria2c -Z \
+aria2c -Z \
     http://192.168.1.1:8080/baseband \
     http://192.168.1.1:8080/cxadc?0 \
     http://192.168.1.1:8080/cxadc?1
@@ -48,26 +52,31 @@ $ aria2c -Z \
 Start the capture:
 
 ```text
-$ curl http://192.168.1.1:8080/start?cxadc0&cxadc1
+curl http://192.168.1.1:8080/start?cxadc0&cxadc1
 ```
 
 Once you're done, you just need to stop it:
 
 ```text
-$ curl http://192.168.1.1:8080/stop
+curl http://192.168.1.1:8080/stop
 ```
 
 ### Local capture
 
+
 The script `local-capture.sh` is included in the repository to aid with local captures. It runs the sever on a UNIX socket, which is the same thing as used for piping command outputs. The benefit of using the server is the sample drop resilient buffering and better starting point synchronization.
+
 
 #### Dependencies
 
 - bash
 - curl
 - jq
-- cxadc_vhs_server
-- ffmpeg (optional) with libsoxr (optional)
+- cxadc-capture-server
+- ffmpeg
+- sox
+- flac (v1.5.0 or newer)
+
 
 You can install the first three from most distros' default repositories: 
 
@@ -83,30 +92,36 @@ yum install bash curl jq
 apt install bash curl jq
 ```
 
-The `cxadc_vhs_server` binary can be obtained from releases, or compiled from sources. The binary releases support glibc 2.17 and later.
+The `cxadc_capture_server` binary can be obtained from releases, or compiled from sources. The binary releases support glibc 2.17 and later.
 
 A static ffmpeg build with libsoxr can be obtained from https://johnvansickle.com/ffmpeg/. If placed next to the script, it will be used instead of system ffmpeg.
 
+
 #### Usage
 
-```text
+
+```
 Usage: local-capture.sh [options] <basepath>
-        --video=          Number of CX card to use for video capture (unset=disabled)
-        --hifi=           Number of CX card to use for hifi capture (unset=disabled)
-        --baseband=       ALSA device identifier for baseband (unset=default)
-        --add-date        Add current date and time to the filenames
+        --video=            Number of CX card to use for video capture (unset=disabled)
+        --hifi=             Number of CX card to use for hifi capture (unset=disabled)
+        --baseband=         ALSA device identifier for baseband (Linear or device decoded HiFi) (unset=default)
+        --add-date          Add current date and time to the filenames
         --convert-baseband  Convert baseband to flac+u8
-        --compress-video  Compress video
-        --compress-hifi   Compress hifi
-        --resample-hifi   Resample hifi to 10 MSps
-        --debug           Show commands executed
-        --help            Show usage information
+        --compress-video    Compress video
+        --compress-hifi     Compress hifi
+        --resample-hifi     Resample hifi to 10 MSps
+        --debug             Show commands executed
+        --help              Show usage information
 ```
 
 #### Example
 
-```text
-$ ./local-capture.sh --video=0 --hifi=1 --convert-baseband --compress-video --compress-hifi --resample-hifi test
+
+    ./local-capture.sh --video=0 --hifi=1 --convert-baseband --compress-video --compress-hifi --resample-hifi test
+
+Terminal Output:
+
+```
 Server started (PID 3854)
 server listening on unix:/tmp/tmp.qDMBd0Ynxu/server.sock
 PID 3872 is capturing video to test-video.ldf
@@ -115,7 +130,11 @@ PID 3876 is capturing baseband to test-baseband.flac, headswitch to test-headswi
 Capture running... Press 'q' to stop the capture.
 Capturing for 0m 0s... Buffers:  0%  0%  0%
 Capturing for 0m 5s... Buffers:  0%  0%  0%
-q
+```
+
+Press "q" to stop
+
+```
 Stopping capture
 Encountered 0 overflows during capture
 Waiting for writes to finish...
