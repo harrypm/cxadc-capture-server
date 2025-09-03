@@ -67,7 +67,7 @@ jobs:
           -DCXADC_CAPTURE_SERVER_MINOR=4 \
           -DCXADC_CAPTURE_SERVER_PATCH=0 \
           -DWINDOWS_BUILD -DNO_AUDIO_CAPTURE \
-          src/main.c src/http.c src/files-windows.c \
+          src/main-windows.c src/http-windows.c src/files-windows.c \
           -o cxadc-capture-server.exe \
           -lws2_32 -static-libgcc
         strip cxadc-capture-server.exe
