@@ -5,8 +5,12 @@
 #ifdef _WIN32
   #include <winsock2.h>
   #include <windows.h>
+  #include <stdarg.h>
   #define read(fd, buf, size) recv(fd, buf, size, 0)
   #define close closesocket
+  // Forward declare dprintf to avoid conflicts
+  int my_dprintf(int fd, const char *format, ...);
+  #define dprintf my_dprintf
 #else
   #include <alloca.h>
   #include <unistd.h>
@@ -101,3 +105,16 @@ void* http_thread(void* arg) {
 void http_handle_request(int client_fd) {
   http_thread((void*)(intptr_t)client_fd);
 }
+
+// Windows compatibility stub
+#ifdef _WIN32
+int my_dprintf(int fd, const char *format, ...) {
+  va_list args;
+  va_start(args, format);
+  char buffer[1024];
+  int len = vsnprintf(buffer, sizeof(buffer), format, args);
+  va_end(args);
+  send(fd, buffer, len, 0);
+  return len;
+}
+#endif
