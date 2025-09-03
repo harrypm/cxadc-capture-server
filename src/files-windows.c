@@ -1,18 +1,8 @@
 #include "files.h"
+#include "win_compat.h"
 
 #include <fcntl.h>
-#ifdef _WIN32
-  #include <winsock2.h>
-  #include <windows.h>
-  #include <stdarg.h>
-  #define close closesocket
-  #define usleep(x) Sleep((x)/1000)
-  #define MAP_FAILED NULL
-  typedef HANDLE pthread_t;
-  // Forward declare dprintf to avoid conflicts
-  int my_dprintf(int fd, const char *format, ...);
-  #define dprintf my_dprintf
-#else
+#ifndef _WIN32
   #include <pthread.h>
   #include <sys/mman.h>
   #include <unistd.h>
@@ -172,15 +162,3 @@ void file_stats(int fd, int argc, char** argv) {
   dprintf(fd, "{\"state\":\"%s\",\"note\":\"Audio capture not available on Windows\"}", capture_state_to_str(state));
 }
 
-// Windows compatibility stubs
-#ifdef _WIN32
-int my_dprintf(int fd, const char *format, ...) {
-  va_list args;
-  va_start(args, format);
-  char buffer[1024];
-  int len = vsnprintf(buffer, sizeof(buffer), format, args);
-  va_end(args);
-  send(fd, buffer, len, 0);
-  return len;
-}
-#endif
